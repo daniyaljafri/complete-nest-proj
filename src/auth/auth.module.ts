@@ -9,6 +9,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { UserSchema } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
+import { SessionsModule } from '../sessions/sessions.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { UsersService } from '../users/users.service';
       inject: [ConfigService],
     }),
     MongooseModule.forFeature([{ name: 'User', schema: UserSchema }]),
+    SessionsModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, UsersService],
