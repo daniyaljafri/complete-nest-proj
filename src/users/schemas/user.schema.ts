@@ -16,12 +16,6 @@ export class User {
   @Prop() password: string;
   @Prop({ enum: Role }) role: Role;
   @Prop({ default: false }) isLoggedIn: boolean;
-  @Prop() loginTime: Date;
-  @Prop() logoutTime: Date;
-
-  //just for checking not req tho
-  @Prop() lastLoginTime: Date;
-  @Prop() lastLogoutTime: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

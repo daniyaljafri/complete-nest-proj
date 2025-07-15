@@ -10,21 +10,18 @@ export class SessionsController {
   @Get('all')
   async getAllSessions() {
     try {
-      this.logger.log('Getting all sessions for all users');
       const sessions = await this.sessionsService.getAllSessions();
       
       return {
         total: sessions.length,
         sessions: sessions.map(session => ({
           sessionId: (session as any)._id,
-          userEmail: (session.userId as any)?.email || 'Unknown',
-          userName: (session.userId as any)?.username || 'Unknown',
+          
           loginTime: session.loginTime,
           logoutTime: session.logoutTime || null
         }))
       };
     } catch (error) {
-      this.logger.error('Failed to get all sessions', error.stack);
       throw new InternalServerErrorException('Failed to get sessions');
     }
   }
@@ -38,18 +35,14 @@ export class SessionsController {
       if (!startDate || !endDate) {
         throw new InternalServerErrorException('startDate and endDate are required');
       }
-
-      this.logger.log('Getting sessions between dates');
       const sessions = await this.sessionsService.getSessionsBetweenDates(startDate, endDate);
-      
       return {
         total: sessions.length,
         startDate,
         endDate,
         sessions: sessions.map(session => ({
           sessionId: (session as any)._id,
-          userEmail: (session.userId as any)?.email || 'Unknown',
-          userName: (session.userId as any)?.username || 'Unknown',
+        
           loginTime: session.loginTime,
           logoutTime: session.logoutTime || null
         }))

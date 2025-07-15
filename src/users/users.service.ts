@@ -3,64 +3,173 @@ import {
   InternalServerErrorException, 
   BadRequestException, 
   NotFoundException,
+  UnauthorizedException,
+  ConflictException,
   Logger 
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { User, UserDocument, Role } from './schemas/user.schema';
 import { CreateUserDto } from './dto/create-user.dto';
+import { LoginUserDto } from './dto/login-user.dto';
+import { SessionsService } from '../sessions/sessions.service';
 
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(@InjectModel(User.name) private userModel: Model<UserDocument>) {}
+  constructor(
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    private jwtService: JwtService,
+    private sessionsService: SessionsService,
+  ) {}
 
-  async create(dto: CreateUserDto): Promise<User> {
+  async register(createUserDto: CreateUserDto) {
     try {
-      this.logger.log(`Creating user with email: ${dto.email}`);
-
-      // Input validation
-      if (!dto.email || !dto.password) {
+      this.logger.log(`Registration attempt for email: ${createUserDto.email}`);
+      if (!createUserDto.email || !createUserDto.password) {
         throw new BadRequestException('Email and password are required');
       }
-
-      if (dto.password.length < 6) {
-        throw new BadRequestException('Password must be at least 6 characters long');
-      }
-
-      if (!dto.role || !Object.values(Role).includes(dto.role)) {
+      if (!createUserDto.role || !Object.values(Role).includes(createUserDto.role)) {
         throw new BadRequestException('Valid role is required');
       }
 
-      // Hash password
-      const hashedPassword = await bcrypt.hash(dto.password, 10);
-      const userData = {
-        ...dto,
-        password: hashedPassword,
-      };
-
-      const newUser = await this.userModel.create(userData);
-      this.logger.log(`User created successfully: ${newUser.email}`);
-      
-      return newUser;
+      const result = await this.create(createUserDto);
+      this.logger.log(`User registered successfully: ${createUserDto.email}`);
+      return result;
     } catch (error) {
-      this.logger.error(`Failed to create user with email: ${dto?.email || 'unknown'}`, error.stack);
+      this.logger.error(`Registration failed for email: ${createUserDto?.email || 'unknown'}`, error.stack);
+ 
+      if (error instanceof BadRequestException || 
+          error instanceof ConflictException) {
+        throw error;
+      }
       
-      // Re-throw validation errors
+      throw new InternalServerErrorException('Registration failed');
+    }
+  }
+
+  async login(loginDto: LoginUserDto) {
+    try {
+      this.logger.log(`Login attempt for email: ${loginDto.email}`);
+      const user = await this.findByEmail(loginDto.email);
+      const isPasswordValid = await bcrypt.compare(loginDto.password, user.password);
+
+      if (!isPasswordValid) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      await this.markAsLoggedIn(user._id);
+
+      const loginTime = new Date();
+      const session = await this.sessionsService.createLoginSession(user._id, loginTime);
+
+      const payload = { 
+        sub: user._id, 
+        email: user.email, 
+        role: user.role,
+        sessionId: (session as any)._id
+      };
+      
+      const token = this.jwtService.sign(payload);
+
+      this.logger.log(`Login successful for user: ${loginDto.email}`);
+      return {
+        user: {
+          id: user._id,
+          email: user.email,
+          username: user.username,
+          role: user.role,
+          isLoggedIn: true,
+        },
+        access_token: token,
+        sessionId: (session as any)._id,
+        loginTime
+      };
+    } catch (error) {
+      this.logger.error(`Login failed for email: ${loginDto?.email || 'unknown'}`, error.stack);
+      
+      if (error instanceof UnauthorizedException || 
+          error instanceof NotFoundException ||
+          error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      throw new InternalServerErrorException('Login failed');
+    }
+  }
+
+  async logout(userId: string, sessionId?: string) {
+    try {
+      this.logger.log(`Logout attempt for user: ${userId}`);
+      
+      if (!userId) {
+        throw new BadRequestException('User ID is required');
+      }
+
+      await this.markAsLoggedOut(userId);
+
+      let result = null;
+      if (sessionId) {
+        result = await this.sessionsService.endSessionById(sessionId);
+        this.logger.log(`Session ${sessionId} ended for user: ${userId}`);
+      } else {
+        result = await this.sessionsService.endSession(userId);
+        this.logger.log(`Latest session ended for user: ${userId}`);
+      }
+
+      this.logger.log(`Logout successful for user: ${userId}`);
+      return {
+        message: 'Logout successful',
+        userId,
+        sessionId,
+        logoutTime: new Date()
+      };
+    } catch (error) {
+      this.logger.error(`Logout failed for user: ${userId || 'unknown'}`, error.stack);
+      
       if (error instanceof BadRequestException) {
         throw error;
       }
       
-      // Handle duplicate email error
-      if (error.code === 11000) {
-        throw new BadRequestException('Email already exists');
+      throw new InternalServerErrorException('Logout failed');
+    }
+  }
+
+  async create(dto: CreateUserDto): Promise<User> {
+    try {
+      if (!dto.email || !dto.password || !dto.username) {
+        throw new BadRequestException('Email, password, and username are required');
+      }
+
+      const existingUser = await this.userModel.findOne({ email: dto.email });
+      if (existingUser) {
+        throw new ConflictException('User with this email already exists');
+      }
+
+      const hashedPassword = await bcrypt.hash(dto.password, 10);
+      const newUser = new this.userModel({
+        ...dto,
+        password: hashedPassword,
+        isLoggedIn: false,
+      });
+
+      const savedUser = await newUser.save();
+      this.logger.log(`User created successfully: ${dto.email}`);
+      
+      const { password, ...userWithoutPassword } = savedUser.toObject();
+      return userWithoutPassword as any;
+    } catch (error) {
+      this.logger.error(`Failed to create user: ${dto?.email || 'unknown'}`, error.stack);
+      
+      if (error instanceof BadRequestException || error instanceof ConflictException) {
+        throw error;
       }
       
-      // Handle bcrypt errors
-      if (error.message && error.message.includes('bcrypt')) {
-        throw new InternalServerErrorException('Password hashing failed');
+      if (error.code === 11000) {
+        throw new ConflictException('User with this email already exists');
       }
       
       throw new InternalServerErrorException('Failed to create user');
@@ -74,11 +183,17 @@ export class UsersService {
       }
 
       this.logger.log(`Finding user by email: ${email}`);
-      return await this.userModel.findOne({ email });
+      const user = await this.userModel.findOne({ email });
+      
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+      
+      return user;
     } catch (error) {
       this.logger.error(`Failed to find user by email: ${email || 'unknown'}`, error.stack);
       
-      if (error instanceof BadRequestException) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
       
@@ -93,7 +208,7 @@ export class UsersService {
       }
 
       this.logger.log(`Finding user by ID: ${id}`);
-      const user = await this.userModel.findById(id);
+      const user = await this.userModel.findById(id).select('-password');
       
       if (!user) {
         throw new NotFoundException('User not found');
@@ -115,44 +230,6 @@ export class UsersService {
     }
   }
 
-  async countByRole(role: Role) {
-    try {
-      if (!role || !Object.values(Role).includes(role)) {
-        throw new BadRequestException('Valid role is required');
-      }
-
-      this.logger.log(`Counting users with role: ${role}`);
-      return await this.userModel.countDocuments({ role });
-    } catch (error) {
-      this.logger.error(`Failed to count users by role: ${role || 'unknown'}`, error.stack);
-      
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      
-      throw new InternalServerErrorException('Failed to count users by role');
-    }
-  }
-
-  async findOne(filter: any) {
-    try {
-      if (!filter || Object.keys(filter).length === 0) {
-        throw new BadRequestException('Search filter is required');
-      }
-
-      this.logger.log(`Finding user with filter: ${JSON.stringify(filter)}`);
-      return await this.userModel.findOne(filter);
-    } catch (error) {
-      this.logger.error(`Failed to find user with filter`, error.stack);
-      
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      
-      throw new InternalServerErrorException('Failed to find user');
-    }
-  }
-
   async findLoggedInUsers() {
     try {
       this.logger.log('Finding all logged-in users');
@@ -163,76 +240,6 @@ export class UsersService {
     }
   }
 
-  async findOfflineUsers() {
-    try {
-      this.logger.log('Finding all offline users');
-      return await this.userModel.find({ isLoggedIn: false }).select('-password');
-    } catch (error) {
-      this.logger.error('Failed to find offline users', error.stack);
-      throw new InternalServerErrorException('Failed to retrieve offline users');
-    }
-  }
-
-  async findLoginRecordsBetween(from: Date, to: Date) {
-    try {
-      if (!from || !to) {
-        throw new BadRequestException('Start date and end date are required');
-      }
-
-      if (from > to) {
-        throw new BadRequestException('Start date must be before end date');
-      }
-
-      this.logger.log(`Finding login records between ${from.toISOString()} and ${to.toISOString()}`);
-      return await this.userModel.find({ 
-        loginTime: { $gte: from, $lte: to } 
-      }).select('-password');
-    } catch (error) {
-      this.logger.error('Failed to find login records between dates', error.stack);
-      
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      
-      throw new InternalServerErrorException('Failed to retrieve login records');
-    }
-  }
-
-  // Check if there's already a supervisor logged in
-  async findLoggedInSupervisor(): Promise<User | null> {
-    try {
-      this.logger.log('Finding logged-in supervisor');
-      return await this.userModel.findOne({ 
-        role: Role.SUPERVISOR, 
-        isLoggedIn: true 
-      });
-    } catch (error) {
-      this.logger.error('Failed to find logged-in supervisor', error.stack);
-      throw new InternalServerErrorException('Failed to check supervisor status');
-    }
-  }
-
-  //      for testing not using it now tho 
-  // Logout all supervisors ( when a new supervisor logs in)
-  async logoutAllSupervisors(): Promise<void> {
-    try {
-      this.logger.log('Logging out all supervisors');
-      const now = new Date();
-      await this.userModel.updateMany(
-        { role: Role.SUPERVISOR, isLoggedIn: true },
-        { 
-          isLoggedIn: false,
-          logoutTime: now,
-          lastLogoutTime: now
-        }
-      );
-      this.logger.log('All supervisors logged out successfully');
-    } catch (error) {
-      this.logger.error('Failed to logout all supervisors', error.stack);
-      throw new InternalServerErrorException('Failed to logout supervisors');
-    }
-  }
-
   async markAsLoggedIn(userId: string) {
     try {
       if (!userId) {
@@ -240,14 +247,9 @@ export class UsersService {
       }
 
       this.logger.log(`Marking user as logged in: ${userId}`);
-      const now = new Date();
       const updatedUser = await this.userModel.findByIdAndUpdate(
         userId,
-        { 
-          isLoggedIn: true, 
-          loginTime: now, 
-          lastLoginTime: now 
-        },
+        { isLoggedIn: true },
         { new: true }
       );
 
@@ -279,14 +281,9 @@ export class UsersService {
       }
 
       this.logger.log(`Marking user as logged out: ${userId}`);
-      const now = new Date();
       const updatedUser = await this.userModel.findByIdAndUpdate(
         userId,
-        { 
-          isLoggedIn: false, 
-          logoutTime: now, 
-          lastLogoutTime: now 
-        },
+        { isLoggedIn: false },
         { new: true }
       );
 
@@ -311,28 +308,22 @@ export class UsersService {
     }
   }
 
-  async getLoginRecords(startDate: Date, endDate: Date) {
+  async countByRole(role: Role) {
     try {
-      if (!startDate || !endDate) {
-        throw new BadRequestException('Start date and end date are required');
+      if (!role || !Object.values(Role).includes(role)) {
+        throw new BadRequestException('Valid role is required');
       }
 
-      if (startDate > endDate) {
-        throw new BadRequestException('Start date must be before end date');
-      }
-
-      this.logger.log(`Getting login records between ${startDate.toISOString()} and ${endDate.toISOString()}`);
-      return await this.userModel.find({
-        lastLoginTime: { $gte: startDate, $lte: endDate }
-      }).select('-password');
+      this.logger.log(`Counting users with role: ${role}`);
+      return await this.userModel.countDocuments({ role });
     } catch (error) {
-      this.logger.error('Failed to get login records', error.stack);
+      this.logger.error(`Failed to count users by role: ${role || 'unknown'}`, error.stack);
       
       if (error instanceof BadRequestException) {
         throw error;
       }
       
-      throw new InternalServerErrorException('Failed to retrieve login records');
+      throw new InternalServerErrorException('Failed to count users by role');
     }
   }
 }
