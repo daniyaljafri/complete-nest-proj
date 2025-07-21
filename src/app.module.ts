@@ -1,5 +1,5 @@
 
-import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
+import { Module, NestModule, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
@@ -32,8 +32,32 @@ import { SupervisorLoginMiddleware } from './middleware/supervisor-login.middlew
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
+    // Step 1: Apply business logic middlewares to registration route
     consumer
-      .apply(AdminRegistrationMiddleware, SupervisorLoginMiddleware, AuthMiddleware, RolesMiddleware)
-      .forRoutes('*'); // Apply to all routes
+      .apply(AdminRegistrationMiddleware)
+      .forRoutes({ path: 'users/register', method: RequestMethod.POST });
+
+    // Step 2: Apply supervisor login middleware to login route
+    consumer
+      .apply(SupervisorLoginMiddleware)
+      .forRoutes({ path: 'users/login', method: RequestMethod.POST });
+
+    // Step 3: Apply auth middleware to all routes EXCEPT public ones
+    consumer
+      .apply(AuthMiddleware)
+      .exclude(
+        { path: 'users/register', method: RequestMethod.POST },
+        { path: 'users/login', method: RequestMethod.POST }
+      )
+      .forRoutes('*');
+
+    // Step 4: Apply roles middleware to protected routes that need role checks
+    consumer
+      .apply(RolesMiddleware)
+      .forRoutes(
+        { path: 'users/logged-in-users', method: RequestMethod.GET },
+        { path: 'sessions/all', method: RequestMethod.GET },
+        { path: 'sessions/dates', method: RequestMethod.GET }
+      );
   }
 }

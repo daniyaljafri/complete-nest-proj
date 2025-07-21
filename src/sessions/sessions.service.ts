@@ -89,4 +89,40 @@ export class SessionsService {
       throw new InternalServerErrorException('Failed to get sessions between dates');
     }
   }
+
+  async getSessionsForUser(userId: string): Promise<Session[]> {
+    try {
+      return await this.sessionModel.find({ userId: new Types.ObjectId(userId) }).sort({ loginTime: -1 });
+    } catch (error) {
+      this.logger.error(`Failed to get sessions for user: ${userId}`, error.stack);
+      throw new InternalServerErrorException('Failed to get user sessions');
+    }
+  }
+
+  async findById(sessionId: string): Promise<Session | null> {
+    try {
+      if (!sessionId) {
+        return null;
+      }
+      const session = await this.sessionModel.findById(sessionId);   
+      if (!session) {
+        return null;
+      }
+      return session;
+    } catch (error) { throw new InternalServerErrorException('Failed to find session');
+    }
+  }
+
+  async endAllActiveSessions(userId: string | Types.ObjectId): Promise<void> {
+    try {
+      await this.sessionModel.updateMany(
+        { userId: new Types.ObjectId(userId), logoutTime: null },
+        { $set: { logoutTime: new Date() } }
+      );
+      this.logger.log(`Ended all active sessions for user: ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to end all active sessions for user: ${userId}`, error.stack);
+      throw new InternalServerErrorException('Failed to end previous sessions');
+    }
+  }
 } 

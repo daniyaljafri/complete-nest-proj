@@ -1,4 +1,4 @@
-import { Injectable, NestMiddleware, ConflictException, Logger } from '@nestjs/common';
+import { Injectable, NestMiddleware, ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { UsersService } from '../users/users.service';
 import { Role } from '../users/schemas/user.schema';
@@ -39,7 +39,12 @@ export class SupervisorLoginMiddleware implements NestMiddleware {
           if (error instanceof ConflictException) {
             throw error;
           }
-          this.logger.error('Error checking supervisor login status', error.stack);
+          if (error instanceof NotFoundException) {
+            // User doesn't exist, which is fine for login attempts
+            this.logger.log(`User not found during login attempt: ${email}`);
+          } else {
+            this.logger.error('Error checking supervisor login status', error.stack);
+          }
         }
       }
     }

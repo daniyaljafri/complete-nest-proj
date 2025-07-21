@@ -61,6 +61,9 @@ export class UsersService {
         throw new UnauthorizedException('Invalid credentials');
       }
 
+      // 🟢 END ALL PREVIOUS ACTIVE SESSIONS FOR THIS USER
+      await this.sessionsService.endAllActiveSessions(user._id);
+
       await this.markAsLoggedIn(user._id);
 
       const loginTime = new Date();
@@ -96,7 +99,6 @@ export class UsersService {
           error instanceof BadRequestException) {
         throw error;
       }
-      
       throw new InternalServerErrorException('Login failed');
     }
   }
@@ -114,13 +116,9 @@ export class UsersService {
       let result = null;
       if (sessionId) {
         result = await this.sessionsService.endSessionById(sessionId);
-        this.logger.log(`Session ${sessionId} ended for user: ${userId}`);
-      } else {
+           } else {
         result = await this.sessionsService.endSession(userId);
-        this.logger.log(`Latest session ended for user: ${userId}`);
       }
-
-      this.logger.log(`Logout successful for user: ${userId}`);
       return {
         message: 'Logout successful',
         userId,
@@ -157,13 +155,9 @@ export class UsersService {
       });
 
       const savedUser = await newUser.save();
-      this.logger.log(`User created successfully: ${dto.email}`);
-      
       const { password, ...userWithoutPassword } = savedUser.toObject();
       return userWithoutPassword as any;
     } catch (error) {
-      this.logger.error(`Failed to create user: ${dto?.email || 'unknown'}`, error.stack);
-      
       if (error instanceof BadRequestException || error instanceof ConflictException) {
         throw error;
       }
@@ -181,23 +175,16 @@ export class UsersService {
       if (!email) {
         throw new BadRequestException('Email is required');
       }
-
-      this.logger.log(`Finding user by email: ${email}`);
       const user = await this.userModel.findOne({ email });
-      
       if (!user) {
         throw new NotFoundException('User not found');
       }
       
       return user;
     } catch (error) {
-      this.logger.error(`Failed to find user by email: ${email || 'unknown'}`, error.stack);
-      
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
-      throw new InternalServerErrorException('Failed to find user by email');
     }
   }
 
@@ -206,8 +193,6 @@ export class UsersService {
       if (!id) {
         throw new BadRequestException('User ID is required');
       }
-
-      this.logger.log(`Finding user by ID: ${id}`);
       const user = await this.userModel.findById(id).select('-password');
       
       if (!user) {
@@ -215,28 +200,19 @@ export class UsersService {
       }
       
       return user;
-    } catch (error) {
-      this.logger.error(`Failed to find user by ID: ${id || 'unknown'}`, error.stack);
-      
+    } catch (error) { 
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
-      if (error.name === 'CastError') {
-        throw new BadRequestException('Invalid user ID format');
-      }
-      
-      throw new InternalServerErrorException('Failed to find user by ID');
+       throw new InternalServerErrorException('Failed to find user by ID');
     }
   }
 
   async findLoggedInUsers() {
     try {
-      this.logger.log('Finding all logged-in users');
       return await this.userModel.find({ isLoggedIn: true }).select('-password');
     } catch (error) {
-      this.logger.error('Failed to find logged-in users', error.stack);
-      throw new InternalServerErrorException('Failed to retrieve logged-in users');
+     throw new InternalServerErrorException('Failed to retrieve logged-in users');
     }
   }
 
@@ -256,22 +232,12 @@ export class UsersService {
       if (!updatedUser) {
         throw new NotFoundException('User not found');
       }
-
-      this.logger.log(`User marked as logged in successfully: ${userId}`);
       return updatedUser;
-    } catch (error) {
-      this.logger.error(`Failed to mark user as logged in: ${userId || 'unknown'}`, error.stack);
-      
+    } catch (error) { 
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
-      if (error.name === 'CastError') {
-        throw new BadRequestException('Invalid user ID format');
-      }
-      
-      throw new InternalServerErrorException('Failed to update user login status');
-    }
+     }
   }
 
   async markAsLoggedOut(userId: string) {
@@ -279,8 +245,6 @@ export class UsersService {
       if (!userId) {
         throw new BadRequestException('User ID is required');
       }
-
-      this.logger.log(`Marking user as logged out: ${userId}`);
       const updatedUser = await this.userModel.findByIdAndUpdate(
         userId,
         { isLoggedIn: false },
@@ -290,20 +254,11 @@ export class UsersService {
       if (!updatedUser) {
         throw new NotFoundException('User not found');
       }
-
-      this.logger.log(`User marked as logged out successfully: ${userId}`);
       return updatedUser;
     } catch (error) {
-      this.logger.error(`Failed to mark user as logged out: ${userId || 'unknown'}`, error.stack);
-      
-      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+         if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
-      if (error.name === 'CastError') {
-        throw new BadRequestException('Invalid user ID format');
-      }
-      
       throw new InternalServerErrorException('Failed to update user logout status');
     }
   }
@@ -313,16 +268,11 @@ export class UsersService {
       if (!role || !Object.values(Role).includes(role)) {
         throw new BadRequestException('Valid role is required');
       }
-
-      this.logger.log(`Counting users with role: ${role}`);
       return await this.userModel.countDocuments({ role });
-    } catch (error) {
-      this.logger.error(`Failed to count users by role: ${role || 'unknown'}`, error.stack);
-      
+    } catch (error) {  
       if (error instanceof BadRequestException) {
         throw error;
-      }
-      
+      } 
       throw new InternalServerErrorException('Failed to count users by role');
     }
   }

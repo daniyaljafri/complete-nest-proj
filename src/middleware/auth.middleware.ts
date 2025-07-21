@@ -2,6 +2,7 @@ import { Injectable, NestMiddleware, UnauthorizedException, Logger } from '@nest
 import { Request, Response, NextFunction } from 'express';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
+import { SessionsService } from '../sessions/sessions.service';
 
 // Extend Request interface to include user
 declare global {
@@ -19,6 +20,7 @@ export class AuthMiddleware implements NestMiddleware {
   constructor(
     private jwtService: JwtService,
     private usersService: UsersService,
+    private sessionsService: SessionsService,
   ) {}
 
   async use(req: Request, res: Response, next: NextFunction) {
@@ -59,11 +61,14 @@ export class AuthMiddleware implements NestMiddleware {
         sessionId: payload.sessionId
       };
 
+      const session = await this.sessionsService.findById(req.user.sessionId);
+      if (!session || session.logoutTime) {
+        throw new UnauthorizedException('Session has ended. Please log in again.');
+      }
+
       this.logger.log(`Authenticated user: ${user.email}`);
       next();
     } catch (error) {
-      this.logger.error(`Authentication failed: ${error.message}`);
-      
       if (error.name === 'JsonWebTokenError') {
         throw new UnauthorizedException('Invalid token');
       }
