@@ -1,0 +1,75 @@
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { Assignment, AssignmentDocument } from './assignment.schema';
+import { CreateAssignmentDto } from './dto/create-assignment.dto';
+
+@Injectable()
+export class AssignmentsService {
+  private readonly logger = new Logger(AssignmentsService.name);
+
+  constructor(
+    @InjectModel(Assignment.name) private assignmentModel: Model<AssignmentDocument>
+  ) {}
+
+  async createAssignment(dto: CreateAssignmentDto): Promise<Assignment> {
+    try {
+      const fromTime = new Date(dto.fromTime);
+      const toTime = new Date(dto.toTime);
+      const officerId = new Types.ObjectId(dto.officerId);
+
+      // Improved overlap logic: check for same officer, overlapping date range, overlapping daysOfWeek, and overlapping time-of-day
+      const overlapQuery: any = {
+        officerId,
+        fromTime: { $lt: toTime },
+        toTime: { $gt: fromTime },
+      };
+      if (dto.daysOfWeek && dto.daysOfWeek.length > 0) {
+        overlapQuery.daysOfWeek = { $in: dto.daysOfWeek };
+      }
+      // Find all potentially overlapping assignments
+      const overlaps = await this.assignmentModel.find(overlapQuery);
+      // Check for actual time-of-day overlap on the same day(s)
+      const newFrom = new Date(dto.fromTime);
+      const newTo = new Date(dto.toTime);
+      const newStartMinutes = newFrom.getUTCHours() * 60 + newFrom.getUTCMinutes();
+      const newEndMinutes = newTo.getUTCHours() * 60 + newTo.getUTCMinutes();
+      for (const overlap of overlaps) {
+        // Only check days that actually overlap
+        if (dto.daysOfWeek && overlap.daysOfWeek) {
+          const commonDays = dto.daysOfWeek.filter(day => overlap.daysOfWeek.includes(day));
+          if (commonDays.length === 0) continue;
+        }
+        // Compare time-of-day overlap
+        const overlapFrom = new Date(overlap.fromTime);
+        const overlapTo = new Date(overlap.toTime);
+        const overlapStartMinutes = overlapFrom.getUTCHours() * 60 + overlapFrom.getUTCMinutes();
+        const overlapEndMinutes = overlapTo.getUTCHours() * 60 + overlapTo.getUTCMinutes();
+        // If time-of-day windows overlap, block
+        if (newStartMinutes < overlapEndMinutes && newEndMinutes > overlapStartMinutes) {
+          throw new Error('Officer already assigned during this time and day.');
+        }
+      }
+
+      const assignment = new this.assignmentModel({
+        officerId,
+        shiftId: new Types.ObjectId(dto.shiftId),
+        fromTime,
+        toTime,
+        daysOfWeek: dto.daysOfWeek,
+      });
+      return await assignment.save();
+    } catch (error) {
+      this.logger.error('Failed to create assignment', error.stack);
+      throw new InternalServerErrorException(error.message || 'Failed to create assignment');
+    }
+  }
+
+  async getAssignmentsForOfficer(officerId: string): Promise<Assignment[]> {
+    return this.assignmentModel.find({ officerId: new Types.ObjectId(officerId) }).sort({ fromTime: 1 });
+  }
+
+  async getAssignmentsForShift(shiftId: string): Promise<Assignment[]> {
+    return this.assignmentModel.find({ shiftId: new Types.ObjectId(shiftId) }).sort({ fromTime: 1 });
+  }
+} 
