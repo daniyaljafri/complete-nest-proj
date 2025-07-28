@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Assignment, AssignmentDocument } from './assignment.schema';
 import { CreateAssignmentDto } from './dto/create-assignment.dto';
+import { FindAvailableOfficersDto } from './dto/find-available-officers.dto';
 
 @Injectable()
 export class AssignmentsService {
@@ -62,6 +63,32 @@ export class AssignmentsService {
     } catch (error) {
       this.logger.error('Failed to create assignment', error.stack);
       throw new InternalServerErrorException(error.message || 'Failed to create assignment');
+    }
+  }
+
+  async findAvailableOfficers(dto: FindAvailableOfficersDto): Promise<string[]> {
+    try {
+      const fromTime = new Date(dto.fromTime);
+      const toTime = new Date(dto.toTime);
+      
+      // Find all assignments that overlap with the requested time range
+      const overlapQuery = {
+        fromTime: { $lt: toTime },
+        toTime: { $gt: fromTime },
+      };
+      
+      const conflictingAssignments = await this.assignmentModel.find(overlapQuery);
+      
+      // Extract officer IDs that have conflicting assignments
+      const busyOfficerIds = conflictingAssignments.map(assignment => 
+        assignment.officerId.toString()
+      );
+      
+      // Return the list of busy officer IDs (the controller will use this to filter available officers)
+      return busyOfficerIds;
+    } catch (error) {
+      this.logger.error('Failed to find available officers', error.stack);
+      throw new InternalServerErrorException('Failed to find available officers');
     }
   }
 

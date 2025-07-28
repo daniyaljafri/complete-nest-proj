@@ -1,6 +1,7 @@
 import { Controller, Post, Body, Get, Param } from '@nestjs/common';
 import { AssignmentsService } from './assignments.service';
 import { CreateAssignmentDto } from './dto/create-assignment.dto';
+import { FindAvailableOfficersDto } from './dto/find-available-officers.dto';
 import { UsersService } from '../users/users.service';
 
 @Controller('assignments')
@@ -13,6 +14,37 @@ export class AssignmentsController {
   @Post()
   async create(@Body() dto: CreateAssignmentDto) {
     return this.assignmentsService.createAssignment(dto);
+  }
+
+  @Post('available-officers')
+  async findAvailableOfficers(@Body() dto: FindAvailableOfficersDto) {
+    // Get all officers
+    const allOfficers = await this.usersService.getAllOfficers();
+    
+    // Get busy officer IDs for the specified time range
+    const busyOfficerIds = await this.assignmentsService.findAvailableOfficers(dto);
+    
+    // Filter out busy officers to get available officers
+    const availableOfficers = allOfficers.filter(officer => 
+      !busyOfficerIds.includes(officer._id.toString())
+    );
+    
+    return {
+      timeRange: {
+        fromTime: dto.fromTime,
+        toTime: dto.toTime
+      },
+      totalOfficers: allOfficers.length,
+      availableOfficers: availableOfficers.length,
+      busyOfficers: busyOfficerIds.length,
+      availableOfficersList: availableOfficers.map(officer => ({
+        id: officer._id,
+        email: officer.email,
+        username: officer.username,
+        role: officer.role,
+        isLoggedIn: officer.isLoggedIn
+      }))
+    };
   }
 
   @Get('officer/:officerId')          
