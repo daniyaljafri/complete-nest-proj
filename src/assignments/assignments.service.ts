@@ -1,16 +1,19 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Assignment, AssignmentDocument } from './assignment.schema';
 import { CreateAssignmentDto } from './dto/create-assignment.dto';
 import { FindAvailableOfficersDto } from './dto/find-available-officers.dto';
+import { ShiftsService } from '../shifts/shifts.service';
+import { ShiftDocument } from '../shifts/shift.schema';
 
 @Injectable()
 export class AssignmentsService {
   private readonly logger = new Logger(AssignmentsService.name);
 
   constructor(
-    @InjectModel(Assignment.name) private assignmentModel: Model<AssignmentDocument>
+    @InjectModel(Assignment.name) private assignmentModel: Model<AssignmentDocument>,
+    private shiftsService: ShiftsService
   ) {}
 
   async createAssignment(dto: CreateAssignmentDto): Promise<Assignment> {
@@ -66,28 +69,60 @@ export class AssignmentsService {
     }
   }
 
-  async findAvailableOfficers(dto: FindAvailableOfficersDto): Promise<string[]> {
+  async findAvailableOfficers(shiftId: string, dto: FindAvailableOfficersDto): Promise<{ busyOfficerIds: string[], shift: any }> {
     try {
-      const fromTime = new Date(dto.fromTime);
-      const toTime = new Date(dto.toTime);
+      // we can First, get shift details hehe
+      const allShifts = await this.shiftsService.getAllShifts();
+      const shift = allShifts.find(s => (s as ShiftDocument)._id.toString() === shiftId);
       
-      // Find all assignments that overlap with the requested time range
+      if (!shift) {
+        throw new NotFoundException('Shift not found');
+      }
+
+      const assignmentFromTime = new Date(dto.fromTime);
+      const assignmentToTime = new Date(dto.toTime);
+      const shiftStartDate = new Date(shift.startDate);
+      const shiftEndDate = new Date(shift.endDate);
+
+      // then validatethat assignment 
+      if (assignmentFromTime < shiftStartDate || assignmentToTime > shiftEndDate) {
+        throw new BadRequestException(
+          `Assignment time (${assignmentFromTime.toISOString()} - ${assignmentToTime.toISOString()}) ` +
+          `must fall within shift time (${shiftStartDate.toISOString()} - ${shiftEndDate.toISOString()})`
+        );
+      }
+
+      
       const overlapQuery = {
-        fromTime: { $lt: toTime },
-        toTime: { $gt: fromTime },
+        fromTime: { $lt: assignmentToTime },
+        toTime: { $gt: assignmentFromTime },
       };
       
       const conflictingAssignments = await this.assignmentModel.find(overlapQuery);
       
-      // Extract officer IDs that have conflicting assignments
-      const busyOfficerIds = conflictingAssignments.map(assignment => 
-        assignment.officerId.toString()
-      );
+      // Extract officer IDs that have conflicting assignments and remove duplicates using Set
+      const busyOfficerIdsSet = new Set<string>();
+      conflictingAssignments.forEach(assignment => {
+        busyOfficerIdsSet.add(assignment.officerId.toString());
+      });
       
-      // Return the list of busy officer IDs (the controller will use this to filter available officers)
-      return busyOfficerIds;
+      const busyOfficerIds = Array.from(busyOfficerIdsSet);
+      
+      return {
+        busyOfficerIds,
+        shift: {
+          id: (shift as ShiftDocument)._id,
+          name: shift.name,
+          description: shift.description,
+          startDate: shift.startDate,
+          endDate: shift.endDate
+        }
+      };
     } catch (error) {
       this.logger.error('Failed to find available officers', error.stack);
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
       throw new InternalServerErrorException('Failed to find available officers');
     }
   }

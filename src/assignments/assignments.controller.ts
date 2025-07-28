@@ -16,21 +16,22 @@ export class AssignmentsController {
     return this.assignmentsService.createAssignment(dto);
   }
 
-  @Post('available-officers')
-  async findAvailableOfficers(@Body() dto: FindAvailableOfficersDto) {
-    // Get all officers
+  @Post('shift/:shiftId/available-officers')
+  async findAvailableOfficers(@Param('shiftId') shiftId: string, @Body() dto: FindAvailableOfficersDto) {
+    // all officers
     const allOfficers = await this.usersService.getAllOfficers();
     
-    // Get busy officer IDs for the specified time range
-    const busyOfficerIds = await this.assignmentsService.findAvailableOfficers(dto);
+    // Get busy officer IDs and shift details for the specified time range
+    const { busyOfficerIds, shift } = await this.assignmentsService.findAvailableOfficers(shiftId, dto);
     
-    // Filter out busy officers to get available officers
+    // Filter 
     const availableOfficers = allOfficers.filter(officer => 
       !busyOfficerIds.includes(officer._id.toString())
     );
     
     return {
-      timeRange: {
+      shift: shift,
+      assignmentTime: {
         fromTime: dto.fromTime,
         toTime: dto.toTime
       },
@@ -43,7 +44,8 @@ export class AssignmentsController {
         username: officer.username,
         role: officer.role,
         isLoggedIn: officer.isLoggedIn
-      }))
+      })),
+      busyOfficersList: busyOfficerIds
     };
   }
 
@@ -57,17 +59,5 @@ export class AssignmentsController {
     return this.assignmentsService.getAssignmentsForShift(shiftId);
   }
 
-  @Get('shift/:shiftId/officers')
-  async getAssignedAndUnassignedOfficers(@Param('shiftId') shiftId: string) {
-    // all assignments for this shift
-    const assignments = await this.assignmentsService.getAssignmentsForShift(shiftId);
-    const officers = await this.usersService.getAllOfficers();
-    const assignedOfficerIds = assignments.map(a => a.officerId.toString());
-    const assignedOfficers = officers.filter(o => assignedOfficerIds.includes(o._id.toString()));
-    const unassignedOfficers = officers.filter(o => !assignedOfficerIds.includes(o._id.toString()));
-    return {
-      assignedOfficers,
-      unassignedOfficers
-    };
-  }
+  // Removed the old route for assigned and unassigned officers
 } 
