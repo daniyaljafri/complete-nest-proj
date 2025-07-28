@@ -11,9 +11,7 @@ export class Session {
   @Prop({ required: true })
   loginTime: Date;
 
-  @Prop(
-    {default: null}
-  )
+  @Prop( {default: null} )
   logoutTime: Date;
 }
 

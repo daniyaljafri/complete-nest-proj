@@ -15,9 +15,9 @@ export class Assignment {
   fromTime: Date; // UTC datetime
 
   @Prop({ required: true })
-  toTime: Date;   // UTC datetime
+  toTime: Date;   
 
-  @Prop({ type: [Number] }) // 0=Sunday, 1=Monday, etc.
+  @Prop({ type: [Number] }) // 0=Sunday, 
   daysOfWeek?: number[];
 }
 

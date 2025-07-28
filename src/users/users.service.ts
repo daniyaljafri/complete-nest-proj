@@ -61,7 +61,7 @@ export class UsersService {
         throw new UnauthorizedException('Invalid credentials');
       }
 
-      // 🟢 END ALL PREVIOUS ACTIVE SESSIONS FOR THIS USER
+      //ENDing previous sessions
       await this.sessionsService.endAllActiveSessions(user._id);
 
       await this.markAsLoggedIn(user._id);
@@ -274,6 +274,14 @@ export class UsersService {
         throw error;
       } 
       throw new InternalServerErrorException('Failed to count users by role');
+    }
+  }
+
+  async getAllOfficers() {
+    try {
+      return await this.userModel.find({ role: Role.OFFICER }).select('-password');
+    } catch (error) {
+      throw new InternalServerErrorException('Failed to get officers');
     }
   }
 }

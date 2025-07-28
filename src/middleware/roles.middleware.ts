@@ -5,23 +5,22 @@ import { Role } from '../users/schemas/user.schema';
 @Injectable()
 export class RolesMiddleware implements NestMiddleware {
   private readonly logger = new Logger(RolesMiddleware.name);
-
-  
-  // Define route-role mapping
   private readonly routeRoles = {
     '/users/logged-in-users': [Role.ADMIN],
     '/sessions/all': [Role.ADMIN],
     '/sessions/dates': [Role.ADMIN],
+    // Restrict shift creation to admin only
+    '/shifts': [Role.ADMIN], // POST /shifts
+    // Restrict assignment creation to admin and supervisor
+    '/assignments': [Role.ADMIN, Role.SUPERVISOR], // POST /assignments
   };
 
   use(req: Request, res: Response, next: NextFunction) {
     try {
-      // Skip if no user 
       if (!req.user) {
         return next();
       }
-
-      // Check if route with specific roles
+      // i was Checking if route with specific roles
       const requiredRoles = this.routeRoles[req.path];
       
       if (requiredRoles && !requiredRoles.includes(req.user.role)) {

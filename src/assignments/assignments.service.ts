@@ -18,7 +18,7 @@ export class AssignmentsService {
       const toTime = new Date(dto.toTime);
       const officerId = new Types.ObjectId(dto.officerId);
 
-      // Improved overlap logic: check for same officer, overlapping date range, overlapping daysOfWeek, and overlapping time-of-day
+      // now chk for same officer, overlapping date range,daysOfWeek, time-of-day
       const overlapQuery: any = {
         officerId,
         fromTime: { $lt: toTime },
@@ -27,15 +27,15 @@ export class AssignmentsService {
       if (dto.daysOfWeek && dto.daysOfWeek.length > 0) {
         overlapQuery.daysOfWeek = { $in: dto.daysOfWeek };
       }
-      // Find all potentially overlapping assignments
+      // we can find all potential ovrrlaps before hand 
       const overlaps = await this.assignmentModel.find(overlapQuery);
-      // Check for actual time-of-day overlap on the same day(s)
+      // Chk for actual time-of-day overlap on the same day
       const newFrom = new Date(dto.fromTime);
       const newTo = new Date(dto.toTime);
       const newStartMinutes = newFrom.getUTCHours() * 60 + newFrom.getUTCMinutes();
       const newEndMinutes = newTo.getUTCHours() * 60 + newTo.getUTCMinutes();
       for (const overlap of overlaps) {
-        // Only check days that actually overlap
+        // Only chk days that actually overlap
         if (dto.daysOfWeek && overlap.daysOfWeek) {
           const commonDays = dto.daysOfWeek.filter(day => overlap.daysOfWeek.includes(day));
           if (commonDays.length === 0) continue;
@@ -45,7 +45,7 @@ export class AssignmentsService {
         const overlapTo = new Date(overlap.toTime);
         const overlapStartMinutes = overlapFrom.getUTCHours() * 60 + overlapFrom.getUTCMinutes();
         const overlapEndMinutes = overlapTo.getUTCHours() * 60 + overlapTo.getUTCMinutes();
-        // If time-of-day windows overlap, block
+       
         if (newStartMinutes < overlapEndMinutes && newEndMinutes > overlapStartMinutes) {
           throw new Error('Officer already assigned during this time and day.');
         }
